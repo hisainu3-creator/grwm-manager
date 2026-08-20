@@ -183,20 +183,36 @@
   .frap-btn{
     position:fixed;
     right:max(20px, calc((100vw - 520px)/2 + 20px));
-    bottom:24px;
-    width:56px; height:56px;
+    bottom:90px;              /* Safari下部のツールバーと被らない高さに調整 */
+    width:72px; height:72px;  /* タップしやすいよう拡大 */
     border-radius:50%;
     background:var(--accent);
     color:#fff;
     border:none;
-    font-size:22px;
+    font-size:30px;
     display:flex; align-items:center; justify-content:center;
-    box-shadow:0 0 6px rgba(0,0,0,.24), 0 8px 12px rgba(0,0,0,.14);
+    box-shadow:0 0 6px rgba(0,0,0,.24), 0 8px 16px rgba(0,0,0,.18);
     cursor:pointer;
     z-index:50;
     transition:transform .2s ease, box-shadow .2s ease;
   }
   .frap-btn:active{ transform:scale(.95); box-shadow:0 8px 12px rgba(0,0,0,0); }
+
+  .start-btn-top{
+    width:100%;
+    padding:14px;
+    border-radius:50px;
+    background:var(--accent);
+    color:#fff;
+    font-weight:800;
+    font-size:14px;
+    letter-spacing:-0.01em;
+    border:none;
+    cursor:pointer;
+    margin-bottom:14px;
+    transition:transform .2s ease;
+  }
+  .start-btn-top:active{ transform:scale(.97); }
 
   /* ---------- 進捗バー ---------- */
   .progress-wrap{ margin-bottom:14px; }
@@ -334,6 +350,17 @@
   }
   .start-btn:active{ transform:scale(.97); }
 
+  .voice-toggle{
+    width:34px; height:34px;
+    border-radius:50%;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    font-size:15px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .voice-toggle.on{ background:var(--accent-light); border-color:var(--accent); }
+
   .save-note{ text-align:center; font-size:11px; color:var(--muted); margin-top:10px; }
 </style>
 </head>
@@ -388,6 +415,7 @@ let state = {
   wakeTime: "08:00",
   leaveTime: "09:00",
   tasks: DEFAULT_TASKS,
+  voiceEnabled: true,     // 音声サポート ON/OFF(見ながら/音を出せない場面ではOFFにできる)
   // --- 実行中のみ使う値 ---
   currentIndex: 0,
   remainingSeconds: 0,
@@ -407,6 +435,7 @@ async function loadConfig(){
       const saved = JSON.parse(res.value);
       state.wakeTime = saved.wakeTime || state.wakeTime;
       state.leaveTime = saved.leaveTime || state.leaveTime;
+      if(typeof saved.voiceEnabled === "boolean") state.voiceEnabled = saved.voiceEnabled;
       if(Array.isArray(saved.tasks) && saved.tasks.length){
         state.tasks = saved.tasks;
       }
@@ -427,6 +456,7 @@ function saveConfig(){
       await window.storage.set("grwm-config", JSON.stringify({
         wakeTime: state.wakeTime,
         leaveTime: state.leaveTime,
+        voiceEnabled: state.voiceEnabled,
         tasks: state.tasks
       }), false); // false = 自分専用データ(他の人には見えない)
     }catch(e){ console.error("保存に失敗しました", e); }
@@ -477,6 +507,30 @@ function beep(){
     osc.stop(ctx.currentTime + 0.4);
   }catch(e){ /* 音が出せない環境なら無視 */ }
   if(navigator.vibrate) navigator.vibrate(200);
+}
+
+// ==========================================================
+// 音声サポート(声でタスクを知らせる)
+// ------------------------------------------------------------
+// ブラウザ標準のspeechSynthesis(読み上げ機能)を使用。
+// state.voiceEnabled が false の時は何も話さない(音を出せない場面用)。
+// ==========================================================
+function speak(text){
+  if(!state.voiceEnabled) return;
+  try{
+    if(!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel(); // 前の読み上げが残っていたら止めてから話す
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = "ja-JP";
+    utter.rate = 1.05;
+    window.speechSynthesis.speak(utter);
+  }catch(e){ /* 読み上げに対応していない環境は無視 */ }
+}
+function toggleVoice(){
+  state.voiceEnabled = !state.voiceEnabled;
+  saveConfig();
+  render();
+  if(state.voiceEnabled) speak("音声サポートをオンにしました");
 }
 
 // ==========================================================
@@ -598,6 +652,7 @@ function startRoutine(){
 
   if(state.currentIndex < state.tasks.length){
     state.remainingSeconds = state.tasks[state.currentIndex].seconds;
+    speak(`${state.tasks[state.currentIndex].name}の時間です`);
   }
   state.screen = "running";
   clearInterval(tickTimer);
@@ -639,6 +694,7 @@ function advance(){
   state.remainingSeconds = state.tasks[next].seconds;
   render();
   drawPipFrame();
+  speak(`${state.tasks[next].name}の時間です`);
   // 画面が切り替わったタイルにフェード演出を付ける
   const tile = document.querySelector(".tile");
   if(tile){ tile.classList.add("flip"); setTimeout(()=>tile.classList.remove("flip"),320); }
@@ -689,9 +745,12 @@ function renderHeader(activeMode){
   return `
   <header class="app-head">
     <h1>GRWM <b>TIMER</b></h1>
-    <div class="mode-switch">
-      <button data-nav="setup" class="${activeMode==='setup'?'active':''}">設定</button>
-      <button data-nav="running" class="${activeMode!=='setup'?'active':''}" ${state.screen==='setup'?'disabled':''}>実行</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="voice-toggle ${state.voiceEnabled?'on':''}" data-act="togglevoice" title="音声サポート">${state.voiceEnabled ? "🔊" : "🔈"}</button>
+      <div class="mode-switch">
+        <button data-nav="setup" class="${activeMode==='setup'?'active':''}">設定</button>
+        <button data-nav="running" class="${activeMode!=='setup'?'active':''}" ${state.screen==='setup'?'disabled':''}>実行</button>
+      </div>
     </div>
   </header>`;
 }
@@ -717,6 +776,7 @@ function renderSetup(){
 
   return `
     ${renderHeader('setup')}
+    <button class="start-btn-top" id="startBtnTop">この内容でスタート ▶</button>
     <div class="setup-block">
       <h2>起床 → 出発</h2>
       <div class="time-row">
@@ -854,6 +914,8 @@ function bindEvents(){
       }
     });
   });
+  const voiceBtn = document.querySelector('[data-act="togglevoice"]');
+  if(voiceBtn) voiceBtn.addEventListener("click", toggleVoice);
 
   if(state.screen === "setup"){
     const wakeInput = document.getElementById("wakeInput");
@@ -907,6 +969,7 @@ function bindEvents(){
       saveConfig(); render();
     });
     document.getElementById("startBtn").addEventListener("click", startRoutine);
+    document.getElementById("startBtnTop").addEventListener("click", startRoutine);
   }
 
   if(state.screen === "running"){
