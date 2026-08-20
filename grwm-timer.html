@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>GRWM タイマー | 出発時刻から逆算する支度アプリ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Lora:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  /* ==========================================================
+     デザイントークン(色・フォント)
+     ------------------------------------------------------------
+     お渡しいただいた DESIGN-starbucks.md の配色・書体ルールを
+     そのまま移植した「試し当て」バージョン。
+     - クリーム地(#f2f0eb)の温かい紙のような背景
+     - House Green(#1E3932)の濃色帯 = 出発カウントの帯(エスプレッソの
+       ダークで挟む構成をそのまま踏襲。元は駅の発車標だった部分を
+       "コーヒーショップの黒板メニュー"のトーンに翻訳)
+     - Green Accent(#00754A) = 現在のタスク・メインCTA
+     - Gold(#cba258) = ご褒美演出。完了画面でのみ使用(乱用しない)
+     - 数字だけ Lora(セリフ)にして黒板メニューのような温かみを演出
+     - SoDoSansは独自書体のため、md記載の代替指定どおりManropeを使用
+       (日本語部分はNoto Sans JPに自動フォールバック)
+     ========================================================== */
+  :root{
+    --bg:#f2f0eb;            /* Neutral Warm: ページ全体のクリーム背景 */
+    --panel:#ffffff;         /* White: カード面 */
+    --panel-2:#edebe9;       /* Ceramic: 入力欄・淡い区切り面 */
+    --line:rgba(0,0,0,.12);  /* 罫線 */
+    --field-line:#d6dbde;    /* フォーム罫線(mdの入力欄仕様どおり) */
+
+    --dark:#1E3932;          /* House Green: 濃色帯(出発カウント) */
+    --dark-text:rgba(255,255,255,.92);
+    --dark-text-soft:rgba(255,255,255,.70);
+
+    --brand:#006241;         /* Starbucks Green: 見出し */
+    --accent:#00754A;        /* Green Accent: メインCTA・現在タスクの数字 */
+    --accent-light:#d4e9e2;  /* 順調時の淡いグリーン washed */
+    --gold:#cba258;          /* Gold: 完了画面のご褒美演出専用 */
+    --danger:#c82014;        /* Red: 遅延・警告 */
+    --danger-tint:rgba(200,32,20,.06);
+
+    --text:rgba(0,0,0,.87);      /* Text Black */
+    --muted:rgba(0,0,0,.58);     /* Text Black Soft */
+
+    --font-ui:'Manrope','Noto Sans JP',sans-serif;   /* UI全般(SoDoSansの代替) */
+    --font-num:'Lora', Georgia, serif;               /* カウントダウン数字(黒板メニュー風セリフ) */
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-ui);
+    letter-spacing:-0.01em;
+    min-height:100vh;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  .app{
+    max-width:520px;
+    margin:0 auto;
+    padding:20px 16px 80px;
+  }
+
+  /* ---------- ヘッダー ---------- */
+  header.app-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:16px;
+  }
+  header.app-head h1{
+    font-size:16px;
+    letter-spacing:-0.01em;
+    font-weight:800;
+    margin:0;
+    color:var(--muted);
+  }
+  header.app-head h1 b{ color:var(--accent); }
+  .mode-switch{
+    display:flex;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:999px;         /* Starbucksのフルピル形状 */
+    overflow:hidden;
+    font-size:12px;
+    padding:3px;
+  }
+  .mode-switch button{
+    background:transparent;
+    border:none;
+    color:var(--muted);
+    padding:6px 12px;
+    border-radius:999px;
+    font-family:var(--font-ui);
+    font-weight:700;
+    cursor:pointer;
+  }
+  .mode-switch button.active{
+    background:var(--accent);
+    color:#fff;
+  }
+
+  /* ---------- 出発カウント帯(House Greenの濃色帯) ---------- */
+  .board{
+    background:var(--dark);
+    border-radius:12px;
+    padding:16px 18px;
+    margin-bottom:14px;
+    color:var(--dark-text);
+  }
+  .board-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .board-label{ font-size:11px; color:var(--dark-text-soft); letter-spacing:.06em; }
+  .board-value{ font-family:var(--font-num); font-size:22px; font-weight:700; color:var(--dark-text); }
+  .board-value.warn{ color:#ff9a8f; }
+  .board-value.ok{ color:var(--accent-light); }
+  .board-sub{ font-size:11px; color:var(--dark-text-soft); margin-top:4px; }
+
+  /* ---------- 現在のタスク(白カード・whisperシャドウ) ---------- */
+  .tile{
+    background:var(--panel);
+    border-radius:12px;
+    padding:26px 18px 22px;
+    text-align:center;
+    margin-bottom:14px;
+    box-shadow:0 0 0.5px rgba(0,0,0,.14), 0 1px 8px rgba(0,0,0,.10);
+    position:relative;
+  }
+  .tile.flip{ animation:flap .32s ease; }
+  @keyframes flap{
+    0%{ transform:translateY(6px); opacity:.3; }
+    100%{ transform:translateY(0); opacity:1; }
+  }
+  .tile-eyebrow{ font-size:11px; letter-spacing:.14em; color:var(--muted); }
+  .tile-task{
+    font-size:24px;
+    font-weight:800;
+    margin:6px 0 14px;
+    color:var(--brand);
+    word-break:break-word;
+  }
+  .tile-count{
+    font-family:var(--font-num);
+    font-size:54px;
+    font-weight:700;
+    color:var(--accent);
+    line-height:1;
+  }
+  .tile-count.behind{ color:var(--danger); }
+  .tile-next{ font-size:12px; color:var(--muted); margin-top:10px; }
+
+  .tile-actions{
+    display:flex;
+    gap:8px;
+    margin-top:18px;
+  }
+  .btn{
+    flex:1;
+    padding:12px 10px;
+    border-radius:50px;          /* Starbucksのフルピルボタン */
+    border:1px solid var(--line);
+    background:var(--panel-2);
+    color:var(--text);
+    font-family:var(--font-ui);
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:-0.01em;
+    cursor:pointer;
+    transition:transform .2s ease, box-shadow .2s ease;
+  }
+  .btn:active{ transform:scale(.95); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.warn{ background:transparent; color:var(--danger); border-color:var(--danger); }
+  .btn.ghost{ background:transparent; color:var(--muted); }
+
+  /* ---------- 「ながら準備」フローティングボタン(Starbucksの Frap CTA を踏襲) ---------- */
+  .frap-btn{
+    position:fixed;
+    right:max(20px, calc((100vw - 520px)/2 + 20px));
+    bottom:24px;
+    width:56px; height:56px;
+    border-radius:50%;
+    background:var(--accent);
+    color:#fff;
+    border:none;
+    font-size:22px;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 6px rgba(0,0,0,.24), 0 8px 12px rgba(0,0,0,.14);
+    cursor:pointer;
+    z-index:50;
+    transition:transform .2s ease, box-shadow .2s ease;
+  }
+  .frap-btn:active{ transform:scale(.95); box-shadow:0 8px 12px rgba(0,0,0,0); }
+
+  /* ---------- 進捗バー ---------- */
+  .progress-wrap{ margin-bottom:14px; }
+  .progress-track{
+    height:8px;
+    background:var(--panel-2);
+    border-radius:8px;
+    overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;
+    background:var(--accent);
+    transition:width .3s ease;
+  }
+  .progress-text{ font-size:11px; color:var(--muted); margin-top:6px; text-align:right; }
+
+  /* ---------- タイムテーブル(横スクロール) ---------- */
+  .timetable{
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+    padding-bottom:6px;
+    margin-bottom:24px;
+  }
+  .timetable::-webkit-scrollbar{ height:4px; }
+  .timetable::-webkit-scrollbar-thumb{ background:var(--line); border-radius:4px; }
+  .stop{
+    flex:0 0 auto;
+    min-width:86px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:8px 10px;
+    text-align:center;
+    box-shadow:0 0 0.5px rgba(0,0,0,.10);
+  }
+  .stop.current{ border-color:var(--accent); background:var(--accent-light); }
+  .stop.done{ opacity:.5; }
+  .stop.skipped{ opacity:.4; text-decoration:line-through; }
+  .stop-time{ font-family:var(--font-num); font-size:11px; color:var(--muted); }
+  .stop-name{ font-size:11px; margin-top:2px; color:var(--text); }
+  .stop-mark{ font-size:10px; margin-top:4px; color:var(--muted); }
+  .stop.current .stop-mark{ color:var(--accent); font-weight:700; }
+  .stop.done .stop-mark{ color:var(--brand); }
+
+  /* ---------- 遅延時のスキップ提案 ---------- */
+  .suggest{
+    background:var(--danger-tint);
+    border:1px solid var(--danger);
+    border-radius:12px;
+    padding:10px 12px;
+    font-size:12px;
+    margin-bottom:14px;
+    color:var(--text);
+  }
+  .suggest b{ color:var(--danger); }
+  .suggest .chips{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .chip{
+    background:#fff;
+    border:1px solid var(--danger);
+    color:var(--danger);
+    border-radius:999px;
+    padding:5px 12px;
+    font-size:11px;
+    font-weight:700;
+    cursor:pointer;
+  }
+
+  /* ---------- 完了画面 ---------- */
+  .finish{ text-align:center; padding:40px 10px; }
+  .finish .big{ font-size:32px; font-weight:800; margin-bottom:8px; color:var(--brand); }
+  .finish .big.reward{ color:var(--gold); }
+  .finish p{ color:var(--muted); font-size:13px; }
+
+  /* ---------- 設定モード ---------- */
+  .setup-block{
+    background:var(--panel);
+    border-radius:12px;
+    padding:14px;
+    margin-bottom:14px;
+    box-shadow:0 0 0.5px rgba(0,0,0,.10);
+  }
+  .setup-block h2{ font-size:12px; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; font-weight:700; text-transform:uppercase; }
+  .time-row{ display:flex; gap:10px; }
+  .field{ flex:1; }
+  .field label{ display:block; font-size:11px; color:var(--muted); margin-bottom:4px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .field input[type=time], .field input[type=text], .field input[type=number]{
+    width:100%;
+    background:#fff;
+    border:1px solid var(--field-line);
+    color:var(--text);
+    border-radius:4px;
+    padding:9px 10px;
+    font-family:var(--font-ui);
+    font-size:14px;
+  }
+  .budget-note{ font-size:11px; margin-top:8px; color:var(--muted); }
+  .budget-note.over{ color:var(--danger); font-weight:700; }
+
+  .task-row{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:8px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .task-row:last-child{ border-bottom:none; }
+  .task-row .order-btns{ display:flex; flex-direction:column; gap:2px; }
+  .order-btns button{
+    background:none; border:none; color:var(--muted);
+    font-size:10px; cursor:pointer; padding:0 4px;
+  }
+  .task-row input[type=text]{ flex:2; min-width:0; }
+  .task-row input[type=number]{ flex:0 0 62px; text-align:center; }
+  .task-row .star{ background:none; border:none; font-size:16px; cursor:pointer; color:var(--gold); }
+  .task-row .star.low{ opacity:.3; color:var(--muted); }
+  .task-row .del{ background:none; border:none; color:var(--danger); font-size:16px; cursor:pointer; }
+
+  .add-row{ display:flex; gap:6px; margin-top:10px; }
+  .add-row input[type=text]{ flex:2; }
+  .add-row input[type=number]{ flex:0 0 62px; }
+
+  .start-btn{
+    width:100%;
+    padding:16px;
+    border-radius:50px;      /* フルピル */
+    background:var(--accent);
+    color:#fff;
+    font-weight:800;
+    font-size:15px;
+    letter-spacing:-0.01em;
+    border:none;
+    cursor:pointer;
+    transition:transform .2s ease;
+  }
+  .start-btn:active{ transform:scale(.97); }
+
+  .save-note{ text-align:center; font-size:11px; color:var(--muted); margin-top:10px; }
+</style>
+</head>
+<body>
+
+<div class="app" id="app"><!-- JSがここに全画面を描画する --></div>
+
+<!-- ========================================================
+     「ながら準備(PinP)」用の非表示パーツ
+     - canvas: カウントダウンの絵を毎秒描き直す下書き
+     - video : canvasの中身を"動画"として偽装するための箱
+       (ブラウザのPinP機能はvideo要素にしか使えないので、
+        canvasの映像をvideoに流し込んで動画のフリをさせる)
+     ======================================================== -->
+<canvas id="pipCanvas" width="320" height="180" style="display:none"></canvas>
+<video id="pipVideo" muted playsinline style="display:none"></video>
+
+<script>
+/* ============================================================
+   GRWM タイマー ロジック
+   ------------------------------------------------------------
+   全体の考え方:
+   1. state という1つのオブジェクトに「起きる時刻/家を出る時刻/
+      タスク一覧/現在の実行状況」を全部持たせる
+   2. state が変わるたびに render() を呼んで画面を全部作り直す
+      (Reactを使わず素のJSでReactっぽい"状態→描画"の形にしている)
+   3. window.storage (Claudeのアーティファクト用の保存API)を使って
+      「起きる時刻/家を出る時刻/タスク一覧」だけを保存する
+      (実行中の進捗はブラウザを閉じたらリセットされる仕様)
+   ============================================================ */
+
+// ---- 初期タスク(久恵さんが挙げてくれたリストをそのまま初期値に) ----
+// duration: 分単位。小数もOK(例 0.5 = 30秒)。setup画面でいつでも変更可能。
+// priority: "high" = 削れない必須タスク / "low" = 遅れたときにスキップ候補になるタスク
+const DEFAULT_TASKS = [
+  ["起きる",1,"high"], ["トイレ行く",2,"high"], ["顔洗う",2,"high"],
+  ["化粧水",1,"low"], ["美容液",1,"low"], ["乳液",1,"low"], ["クリーム",1,"low"],
+  ["目元クリーム",1,"low"], ["着替えを選ぶ",2,"low"], ["着替える",3,"high"],
+  ["ヘアオイル",1,"low"], ["ドライヤー",5,"high"], ["日焼け止め",1,"high"],
+  ["リキッドファンデ",2,"high"], ["パウダーつける",1,"low"], ["ビューラー",1,"low"],
+  ["アイメイク",2,"low"], ["アイライン",2,"low"], ["マスカラ",1,"low"],
+  ["リップライン",1,"low"], ["リップ",1,"low"], ["チーク",1,"low"],
+  ["シェーディング",1,"low"], ["ハイライト",1,"low"], ["仕上げスプレー",1,"low"],
+  ["ストレートアイロン/コテ",5,"low"], ["ワックスで固める",1,"low"],
+  ["お湯を沸かす",3,"high"], ["朝ごはんを食べる",10,"high"], ["皿を洗う",3,"low"],
+  ["お弁当と水筒をバッグに入れる",2,"high"], ["家を出る",1,"high"]
+].map((t,i)=>({ id:"t"+i, name:t[0], seconds:Math.round(t[1]*60), priority:t[2] }));
+
+// ---- アプリ全体の状態 ----
+let state = {
+  screen: "setup",        // "setup"(設定画面) | "running"(実行中) | "finished"(完了画面)
+  wakeTime: "08:00",
+  leaveTime: "09:00",
+  tasks: DEFAULT_TASKS,
+  // --- 実行中のみ使う値 ---
+  currentIndex: 0,
+  remainingSeconds: 0,
+  startedAt: null,        // 開始した瞬間のDate
+  plannedStops: [],        // タイムテーブル表示用(開始時に計算した予定時刻)
+};
+
+let tickTimer = null; // setInterval のID
+
+// ==========================================================
+// 保存/読み込み(window.storage = クラウド側の永続保存API)
+// ==========================================================
+async function loadConfig(){
+  try{
+    const res = await window.storage.get("grwm-config"); // 個人用データとして保存
+    if(res && res.value){
+      const saved = JSON.parse(res.value);
+      state.wakeTime = saved.wakeTime || state.wakeTime;
+      state.leaveTime = saved.leaveTime || state.leaveTime;
+      if(Array.isArray(saved.tasks) && saved.tasks.length){
+        state.tasks = saved.tasks;
+      }
+    }
+  }catch(e){
+    // 保存データがまだ無い場合はここに来る → デフォルトのまま進めばOK
+    console.log("保存データなし。デフォルト設定で開始します。", e);
+  }
+  render();
+}
+
+let saveTimeout = null;
+function saveConfig(){
+  // 入力のたびに毎回保存すると通信が多くなるので、300ms待って最後の1回だけ保存する
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async ()=>{
+    try{
+      await window.storage.set("grwm-config", JSON.stringify({
+        wakeTime: state.wakeTime,
+        leaveTime: state.leaveTime,
+        tasks: state.tasks
+      }), false); // false = 自分専用データ(他の人には見えない)
+    }catch(e){ console.error("保存に失敗しました", e); }
+  }, 300);
+}
+
+// ==========================================================
+// 時刻まわりのユーティリティ
+// ==========================================================
+function fmtClock(d){
+  return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
+}
+function fmtCountdown(totalSeconds){
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s/60);
+  const ss = s%60;
+  return m.toString().padStart(2,"0")+":"+ss.toString().padStart(2,"0");
+}
+function fmtHM(totalSeconds){
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s/3600);
+  const m = Math.floor((s%3600)/60);
+  if(h>0) return h+"時間"+m+"分";
+  return m+"分";
+}
+// "09:00" のような文字列 → 今日のその時刻のDateオブジェクトに変換
+function timeStrToDate(str){
+  const [h,m] = str.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+// ==========================================================
+// 効果音・バイブ(タスクが切り替わった合図)
+// ==========================================================
+function beep(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  }catch(e){ /* 音が出せない環境なら無視 */ }
+  if(navigator.vibrate) navigator.vibrate(200);
+}
+
+// ==========================================================
+// 「ながら準備(PinP)」機能
+// ------------------------------------------------------------
+// 仕組み:
+//   1. 見えないcanvasに「タスク名・残り時間」を毎秒描画する
+//   2. canvas.captureStream() で、その描画を"動画のストリーム"に変換
+//   3. その映像を見えないvideo要素に流し込んで再生する
+//   4. video.requestPictureInPicture() を呼ぶと、
+//      YouTube動画などと同じ「小窓(常に最前面)」として表示される
+//   → 他のタブ・他のアプリ(YouTube等)を操作していても、
+//     この小窓だけは画面の上に浮かんだまま残る
+//   小窓の中身はHouse Green×Goldの配色にして、本体UIとトーンを合わせている
+// 対応環境: PC版Chrome/Edge/Safari、iOS Safari、Android Chromeは概ね対応。
+//   PC版Firefoxなど一部ブラウザは非対応の場合があります。
+// ==========================================================
+let pipStreamStarted = false;
+
+function drawPipFrame(){
+  const canvas = document.getElementById("pipCanvas");
+  if(!canvas || state.screen !== "running") return;
+  const ctx = canvas.getContext("2d");
+  const task = state.tasks[state.currentIndex];
+  const budget = computeBudget();
+  const behind = budget.buffer < 0;
+
+  // 背景(House Green)
+  ctx.fillStyle = "#1E3932";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // タスク名(上段)
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  ctx.font = "600 15px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(task ? task.name : "完了", canvas.width/2, 34);
+
+  // 残り時間(大きい数字・中段。順調ならGold、遅れならRed) ← ここが一番見たい情報
+  ctx.fillStyle = behind ? "#ff9a8f" : "#cba258";
+  ctx.font = "700 56px Georgia, serif";
+  ctx.fillText(fmtCountdown(state.remainingSeconds), canvas.width/2, 105);
+
+  // 出発までのバッファ(下段・小さめ)
+  ctx.fillStyle = behind ? "#ff9a8f" : "#d4e9e2";
+  ctx.font = "500 14px sans-serif";
+  ctx.fillText((behind?"遅れ ":"余裕 ") + fmtHM(Math.abs(budget.buffer)), canvas.width/2, 150);
+}
+
+async function togglePip(){
+  // すでに小窓が出ていれば閉じるだけ
+  if(document.pictureInPictureElement){
+    await document.exitPictureInPicture();
+    return;
+  }
+  if(!("pictureInPictureEnabled" in document)){
+    alert("お使いのブラウザは「見ながら準備(PinP)」に対応していません。");
+    return;
+  }
+  const canvas = document.getElementById("pipCanvas");
+  const video = document.getElementById("pipVideo");
+  drawPipFrame(); // 最初の1枚を描いておく
+
+  if(!pipStreamStarted){
+    // 1秒ごとに更新されれば十分なので1fpsでキャプチャ(負荷が軽い)
+    const stream = canvas.captureStream(1);
+    video.srcObject = stream;
+    await video.play();
+    pipStreamStarted = true;
+  }
+  try{
+    await video.requestPictureInPicture();
+  }catch(e){
+    alert("PinPを開始できませんでした。ボタンを押した直後にもう一度お試しください。");
+  }
+}
+
+// ==========================================================
+// 実行モードのロジック
+// ==========================================================
+function activeTasks(){
+  // done でも skipped でもないタスクの並び
+  return state.tasks;
+}
+function firstUnfinishedIndex(from){
+  let i = from;
+  while(i < state.tasks.length && (state.tasks[i].done || state.tasks[i].skipped)) i++;
+  return i;
+}
+
+function startRoutine(){
+  state.tasks = state.tasks.map(t=>({...t, done:false, skipped:false}));
+  state.currentIndex = firstUnfinishedIndex(0);
+  state.startedAt = new Date();
+
+  // タイムテーブル用に「予定時刻」を最初に一度だけ計算しておく
+  let cursor = new Date(state.startedAt);
+  state.plannedStops = state.tasks.map(t=>{
+    const at = new Date(cursor);
+    cursor = new Date(cursor.getTime() + t.seconds*1000);
+    return { id:t.id, at };
+  });
+
+  if(state.currentIndex < state.tasks.length){
+    state.remainingSeconds = state.tasks[state.currentIndex].seconds;
+  }
+  state.screen = "running";
+  clearInterval(tickTimer);
+  tickTimer = setInterval(tick, 1000);
+  render();
+  drawPipFrame();
+}
+
+function tick(){
+  if(state.screen !== "running") return;
+  state.remainingSeconds -= 1;
+  if(state.remainingSeconds <= 0){
+    completeTask(true); // true = 時間切れによる自動完了
+    return; // completeTask内でrenderする
+  }
+  render();
+  drawPipFrame(); // 小窓が開いていれば、その中身もここで更新する
+}
+
+function completeTask(auto){
+  const task = state.tasks[state.currentIndex];
+  if(task) task.done = true;
+  if(auto) beep();
+  advance();
+}
+function skipTask(index){
+  const task = state.tasks[index];
+  if(task) task.skipped = true;
+  if(index === state.currentIndex) advance();
+  else render();
+}
+function advance(){
+  const next = firstUnfinishedIndex(state.currentIndex+1);
+  state.currentIndex = next;
+  if(next >= state.tasks.length){
+    finishRoutine();
+    return;
+  }
+  state.remainingSeconds = state.tasks[next].seconds;
+  render();
+  drawPipFrame();
+  // 画面が切り替わったタイルにフェード演出を付ける
+  const tile = document.querySelector(".tile");
+  if(tile){ tile.classList.add("flip"); setTimeout(()=>tile.classList.remove("flip"),320); }
+}
+function extendCurrent(sec){
+  state.remainingSeconds += sec;
+  render();
+}
+function finishRoutine(){
+  clearInterval(tickTimer);
+  state.screen = "finished";
+  render();
+}
+function stopAndReset(){
+  clearInterval(tickTimer);
+  state.tasks = state.tasks.map(t=>({...t, done:false, skipped:false}));
+  state.screen = "setup";
+  render();
+}
+
+// 「予定終了時刻に対して間に合うか」を計算
+function computeBudget(){
+  const now = new Date();
+  const leave = timeStrToDate(state.leaveTime);
+  const secondsUntilLeave = (leave - now)/1000;
+
+  // 残りタスク(現在のタスクは残り時間、それ以降は満額)の合計秒数
+  let remainingWork = state.remainingSeconds;
+  for(let i=state.currentIndex+1;i<state.tasks.length;i++){
+    const t = state.tasks[i];
+    if(!t.done && !t.skipped) remainingWork += t.seconds;
+  }
+  return { secondsUntilLeave, remainingWork, buffer: secondsUntilLeave - remainingWork };
+}
+
+// ==========================================================
+// 描画(render) — stateの中身を見てHTMLを作り直す
+// ==========================================================
+function render(){
+  const app = document.getElementById("app");
+  if(state.screen === "setup") app.innerHTML = renderSetup();
+  else if(state.screen === "running") app.innerHTML = renderRunning();
+  else app.innerHTML = renderFinished();
+  bindEvents();
+}
+
+function renderHeader(activeMode){
+  return `
+  <header class="app-head">
+    <h1>GRWM <b>TIMER</b></h1>
+    <div class="mode-switch">
+      <button data-nav="setup" class="${activeMode==='setup'?'active':''}">設定</button>
+      <button data-nav="running" class="${activeMode!=='setup'?'active':''}" ${state.screen==='setup'?'disabled':''}>実行</button>
+    </div>
+  </header>`;
+}
+
+function renderSetup(){
+  const total = state.tasks.reduce((s,t)=>s+t.seconds,0);
+  const wake = timeStrToDate(state.wakeTime);
+  const leave = timeStrToDate(state.leaveTime);
+  const available = (leave-wake)/1000;
+  const over = total > available;
+
+  const rows = state.tasks.map((t,i)=>`
+    <div class="task-row" data-id="${t.id}">
+      <div class="order-btns">
+        <button data-act="up" data-i="${i}" ${i===0?'disabled':''}>▲</button>
+        <button data-act="down" data-i="${i}" ${i===state.tasks.length-1?'disabled':''}>▼</button>
+      </div>
+      <button class="star ${t.priority==='low'?'low':''}" data-act="priority" data-i="${i}" title="必須/スキップ可の切替">★</button>
+      <input type="text" data-act="name" data-i="${i}" value="${escapeHtml(t.name)}">
+      <input type="number" min="0" step="0.5" data-act="min" data-i="${i}" value="${(t.seconds/60).toString()}">
+      <button class="del" data-act="del" data-i="${i}">×</button>
+    </div>`).join("");
+
+  return `
+    ${renderHeader('setup')}
+    <div class="setup-block">
+      <h2>起床 → 出発</h2>
+      <div class="time-row">
+        <div class="field"><label>起きる時刻</label><input type="time" id="wakeInput" value="${state.wakeTime}"></div>
+        <div class="field"><label>家を出る時刻</label><input type="time" id="leaveInput" value="${state.leaveTime}"></div>
+      </div>
+      <div class="budget-note ${over?'over':''}">
+        タスク合計 ${fmtHM(total)} / 使える時間 ${fmtHM(available)}
+        ${over ? "　⚠️ 合計時間がオーバーしています。時間を減らすか起床を早めましょう" : "　✓ 時間内に収まっています"}
+      </div>
+    </div>
+
+    <div class="setup-block">
+      <h2>タスク一覧(★=必須 / 白抜き=遅れた時にスキップ候補)</h2>
+      ${rows}
+      <div class="add-row">
+        <input type="text" id="newName" placeholder="新しいタスク名">
+        <input type="number" id="newMin" placeholder="分" min="0" step="0.5" value="2">
+        <button class="btn" id="addTaskBtn">追加</button>
+      </div>
+    </div>
+
+    <button class="start-btn" id="startBtn">この内容でスタート ▶</button>
+    <div class="save-note">入力内容は自動で保存されます</div>
+  `;
+}
+
+function renderRunning(){
+  const task = state.tasks[state.currentIndex];
+  const nextTask = state.tasks.slice(state.currentIndex+1).find(t=>!t.done && !t.skipped);
+  const budget = computeBudget();
+  const behind = budget.buffer < 0;
+
+  const doneCount = state.tasks.filter(t=>t.done||t.skipped).length;
+  const pct = Math.round(doneCount/state.tasks.length*100);
+
+  const stops = state.tasks.map((t,i)=>{
+    const planned = state.plannedStops.find(p=>p.id===t.id);
+    let cls = "stop";
+    let mark = "";
+    if(t.done){ cls+=" done"; mark="✓"; }
+    else if(t.skipped){ cls+=" skipped"; mark="skip"; }
+    else if(i===state.currentIndex){ cls+=" current"; mark="▶ 実行中"; }
+    return `<div class="${cls}">
+      <div class="stop-time">${planned?fmtClock(planned.at):""}</div>
+      <div class="stop-name">${escapeHtml(t.name)}</div>
+      <div class="stop-mark">${mark}</div>
+    </div>`;
+  }).join("");
+
+  const lowPriorityCandidates = state.tasks
+    .map((t,i)=>({...t,i}))
+    .filter(t=>!t.done && !t.skipped && t.priority==='low' && t.i>state.currentIndex);
+
+  return `
+    ${renderHeader('running')}
+    <div class="board">
+      <div class="board-row">
+        <div>
+          <div class="board-label">出発予定</div>
+          <div class="board-value">${state.leaveTime}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="board-label">${behind?'このままだと遅刻します':'順調です'}</div>
+          <div class="board-value ${behind?'warn':'ok'}">${behind?'-':''}${fmtHM(Math.abs(budget.buffer))}</div>
+        </div>
+      </div>
+      <div class="board-sub">現在時刻 ${fmtClock(new Date())}</div>
+    </div>
+
+    ${behind && lowPriorityCandidates.length ? `
+    <div class="suggest">
+      <b>遅れています。</b>スキップ可のタスクを飛ばして巻き返せます:
+      <div class="chips">
+        ${lowPriorityCandidates.map(t=>`<span class="chip" data-act="quickskip" data-i="${t.i}">${escapeHtml(t.name)} を飛ばす</span>`).join("")}
+      </div>
+    </div>` : ""}
+
+    <div class="tile">
+      <div class="tile-eyebrow">TASK ${state.currentIndex+1} / ${state.tasks.length}</div>
+      <div class="tile-task">${escapeHtml(task.name)}</div>
+      <div class="tile-count ${behind?'behind':''}">${fmtCountdown(state.remainingSeconds)}</div>
+      <div class="tile-next">${nextTask ? "次: "+escapeHtml(nextTask.name) : "これが最後のタスクです"}</div>
+      <div class="tile-actions">
+        <button class="btn" data-act="extend">+30秒</button>
+        <button class="btn primary" data-act="complete">完了 ✓</button>
+        <button class="btn warn" data-act="skip">スキップ</button>
+      </div>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+      <div class="progress-text">${doneCount} / ${state.tasks.length} 完了</div>
+    </div>
+
+    <div class="timetable">${stops}</div>
+
+    <button class="btn ghost" style="width:100%" data-act="stop">中断して設定に戻る</button>
+
+    <!-- Starbucksの "Frap" フローティングCTAを踏襲した、常時アクセスできる丸ボタン -->
+    <button class="frap-btn" data-act="pip" title="ながら準備で見る(小窓表示)">📺</button>
+  `;
+}
+
+function renderFinished(){
+  const doneCount = state.tasks.filter(t=>t.done).length;
+  const skipCount = state.tasks.filter(t=>t.skipped).length;
+  const now = new Date();
+  const leave = timeStrToDate(state.leaveTime);
+  const onTime = now <= leave;
+  return `
+    ${renderHeader('running')}
+    <div class="finish">
+      <div class="big ${onTime?'reward':''}">${onTime ? "🎉 間に合いました！" : "お疲れさまでした"}</div>
+      <p>完了 ${doneCount}件 / スキップ ${skipCount}件<br>現在時刻 ${fmtClock(now)}(出発予定 ${state.leaveTime})</p>
+      <button class="btn primary" style="margin-top:16px" data-act="backToSetup">設定画面に戻る</button>
+    </div>
+  `;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ==========================================================
+// イベント紐付け(render()のたびに呼び直す)
+// ==========================================================
+function bindEvents(){
+  // ヘッダーのモード切替
+  document.querySelectorAll("[data-nav]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const target = btn.getAttribute("data-nav");
+      if(target === "setup" && state.screen !== "setup"){
+        if(confirm("設定画面に戻ると現在の実行はリセットされます。よろしいですか?")) stopAndReset();
+      }
+    });
+  });
+
+  if(state.screen === "setup"){
+    const wakeInput = document.getElementById("wakeInput");
+    const leaveInput = document.getElementById("leaveInput");
+    wakeInput.addEventListener("change", e=>{ state.wakeTime=e.target.value; saveConfig(); render(); });
+    leaveInput.addEventListener("change", e=>{ state.leaveTime=e.target.value; saveConfig(); render(); });
+
+    document.querySelectorAll('[data-act="name"]').forEach(inp=>{
+      inp.addEventListener("change", e=>{
+        state.tasks[+e.target.dataset.i].name = e.target.value; saveConfig();
+      });
+    });
+    document.querySelectorAll('[data-act="min"]').forEach(inp=>{
+      inp.addEventListener("change", e=>{
+        const min = Math.max(0, parseFloat(e.target.value)||0);
+        state.tasks[+e.target.dataset.i].seconds = Math.round(min*60);
+        saveConfig(); render();
+      });
+    });
+    document.querySelectorAll('[data-act="priority"]').forEach(btn=>{
+      btn.addEventListener("click", e=>{
+        const i = +e.target.dataset.i;
+        state.tasks[i].priority = state.tasks[i].priority==='high' ? 'low' : 'high';
+        saveConfig(); render();
+      });
+    });
+    document.querySelectorAll('[data-act="del"]').forEach(btn=>{
+      btn.addEventListener("click", e=>{
+        state.tasks.splice(+e.target.dataset.i,1); saveConfig(); render();
+      });
+    });
+    document.querySelectorAll('[data-act="up"]').forEach(btn=>{
+      btn.addEventListener("click", e=>{
+        const i = +e.target.dataset.i;
+        [state.tasks[i-1], state.tasks[i]] = [state.tasks[i], state.tasks[i-1]];
+        saveConfig(); render();
+      });
+    });
+    document.querySelectorAll('[data-act="down"]').forEach(btn=>{
+      btn.addEventListener("click", e=>{
+        const i = +e.target.dataset.i;
+        [state.tasks[i+1], state.tasks[i]] = [state.tasks[i], state.tasks[i+1]];
+        saveConfig(); render();
+      });
+    });
+    document.getElementById("addTaskBtn").addEventListener("click", ()=>{
+      const name = document.getElementById("newName").value.trim();
+      const min = Math.max(0, parseFloat(document.getElementById("newMin").value)||0);
+      if(!name) return;
+      state.tasks.push({ id:"t"+Date.now(), name, seconds:Math.round(min*60), priority:"low" });
+      saveConfig(); render();
+    });
+    document.getElementById("startBtn").addEventListener("click", startRoutine);
+  }
+
+  if(state.screen === "running"){
+    const act = (sel,fn)=>{ const el=document.querySelector(sel); if(el) el.addEventListener("click",fn); };
+    act('[data-act="complete"]', ()=>completeTask(false));
+    act('[data-act="skip"]', ()=>skipTask(state.currentIndex));
+    act('[data-act="extend"]', ()=>extendCurrent(30));
+    act('[data-act="stop"]', ()=>{ if(confirm("実行を中断して設定に戻りますか?")) stopAndReset(); });
+    act('[data-act="pip"]', togglePip);
+    document.querySelectorAll('[data-act="quickskip"]').forEach(chip=>{
+      chip.addEventListener("click", e=>skipTask(+e.target.dataset.i));
+    });
+  }
+
+  if(state.screen === "finished"){
+    document.querySelector('[data-act="backToSetup"]').addEventListener("click", stopAndReset);
+  }
+}
+
+// ---- 起動 ----
+loadConfig();
+</script>
+</body>
+</html>
