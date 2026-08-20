@@ -496,6 +496,20 @@ function beep(){
 // ==========================================================
 let pipStreamStarted = false;
 
+// 映像ストリームの準備(canvas→video)は、タップより"前"にあらかじめ済ませておく。
+// iOS Safariは「タップ→即requestPictureInPicture()」という一直線の流れじゃないと
+// 「ユーザー操作から呼ばれた」と認めてくれず拒否するため、準備はここで先にやっておく。
+function setupPipStream(){
+  if(pipStreamStarted) return;
+  const canvas = document.getElementById("pipCanvas");
+  const video = document.getElementById("pipVideo");
+  drawPipFrame();
+  const stream = canvas.captureStream(2); // 1〜2fpsで十分(数字が変わる程度の更新)
+  video.srcObject = stream;
+  video.play().catch(()=>{ /* mutedなのでほぼ失敗しない想定 */ });
+  pipStreamStarted = true;
+}
+
 function drawPipFrame(){
   const canvas = document.getElementById("pipCanvas");
   if(!canvas || state.screen !== "running") return;
@@ -525,31 +539,34 @@ function drawPipFrame(){
   ctx.fillText((behind?"遅れ ":"余裕 ") + fmtHM(Math.abs(budget.buffer)), canvas.width/2, 150);
 }
 
-async function togglePip(){
-  // すでに小窓が出ていれば閉じるだけ
-  if(document.pictureInPictureElement){
-    await document.exitPictureInPicture();
-    return;
-  }
-  if(!("pictureInPictureEnabled" in document)){
-    alert("お使いのブラウザは「見ながら準備(PinP)」に対応していません。");
-    return;
-  }
-  const canvas = document.getElementById("pipCanvas");
+// ボタンのクリックから「間に何のawaitも挟まず」直接呼ぶのがポイント(iOS Safari対策)。
+// なのでこの関数自体はasyncにしない。
+function togglePip(){
   const video = document.getElementById("pipVideo");
-  drawPipFrame(); // 最初の1枚を描いておく
 
-  if(!pipStreamStarted){
-    // 1秒ごとに更新されれば十分なので1fpsでキャプチャ(負荷が軽い)
-    const stream = canvas.captureStream(1);
-    video.srcObject = stream;
-    await video.play();
-    pipStreamStarted = true;
+  // すでに小窓が出ていれば閉じる
+  if(document.pictureInPictureElement || video.webkitPresentationMode === "picture-in-picture"){
+    if(document.exitPictureInPicture) document.exitPictureInPicture().catch(()=>{});
+    if(video.webkitSetPresentationMode) video.webkitSetPresentationMode("inline");
+    return;
   }
-  try{
-    await video.requestPictureInPicture();
-  }catch(e){
-    alert("PinPを開始できませんでした。ボタンを押した直後にもう一度お試しください。");
+
+  setupPipStream(); // 未準備ならここで用意(通常はstartRoutine時点で準備済み)
+
+  // --- iOS/macOS Safari専用のPinP API ---
+  // Safariは標準API(requestPictureInPicture)より先にこちらを試す必要がある
+  if(video.webkitSupportsPresentationMode && typeof video.webkitSetPresentationMode === "function"){
+    video.webkitSetPresentationMode("picture-in-picture");
+    return;
+  }
+
+  // --- Chrome/Edgeなど標準API ---
+  if(video.requestPictureInPicture){
+    video.requestPictureInPicture().catch(()=>{
+      alert("PinPを開始できませんでした。もう一度ボタンをタップしてお試しください。");
+    });
+  }else{
+    alert("お使いのブラウザは「見ながら準備(PinP)」に対応していません。");
   }
 }
 
@@ -586,7 +603,7 @@ function startRoutine(){
   clearInterval(tickTimer);
   tickTimer = setInterval(tick, 1000);
   render();
-  drawPipFrame();
+  setupPipStream(); // 映像ストリームをここで先に用意しておく(PinPタップ時に間を空けないため)
 }
 
 function tick(){
