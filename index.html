@@ -104,31 +104,35 @@
   }
 
   /* ---------- 出発カウント帯(House Greenの濃色帯) ---------- */
+  /* 一番大事な「出るまでの残り時間」をヒーロー表示にする(最優先で目立たせる) */
   .board{
     background:var(--dark);
     border-radius:12px;
-    padding:16px 18px;
-    margin-bottom:14px;
+    padding:14px 18px 16px;
+    margin-bottom:10px;
     color:var(--dark-text);
-  }
-  .board-row{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
+    text-align:center;
   }
   .board-label{ font-size:11px; color:var(--dark-text-soft); letter-spacing:.06em; }
-  .board-value{ font-family:var(--font-num); font-size:22px; font-weight:700; color:var(--dark-text); }
-  .board-value.warn{ color:#ff9a8f; }
-  .board-value.ok{ color:var(--accent-light); }
-  .board-sub{ font-size:11px; color:var(--dark-text-soft); margin-top:4px; }
+  .board-hero{
+    font-family:var(--font-num);
+    font-size:46px;
+    font-weight:700;
+    line-height:1.1;
+    margin:2px 0;
+    color:var(--accent-light);   /* 順調時 */
+  }
+  .board-hero.warn{ color:#ff9a8f; }  /* 遅刻の危険がある時 */
+  .board-sub{ font-size:11px; color:var(--dark-text-soft); margin-top:2px; }
 
   /* ---------- 現在のタスク(白カード・whisperシャドウ) ---------- */
+  /* 全体の残り時間より優先度を下げて、コンパクトに */
   .tile{
     background:var(--panel);
     border-radius:12px;
-    padding:26px 18px 22px;
+    padding:14px 18px 16px;
     text-align:center;
-    margin-bottom:14px;
+    margin-bottom:10px;
     box-shadow:0 0 0.5px rgba(0,0,0,.14), 0 1px 8px rgba(0,0,0,.10);
     position:relative;
   }
@@ -137,23 +141,23 @@
     0%{ transform:translateY(6px); opacity:.3; }
     100%{ transform:translateY(0); opacity:1; }
   }
-  .tile-eyebrow{ font-size:11px; letter-spacing:.14em; color:var(--muted); }
+  .tile-eyebrow{ font-size:10px; letter-spacing:.14em; color:var(--muted); }
   .tile-task{
-    font-size:24px;
+    font-size:18px;
     font-weight:800;
-    margin:6px 0 14px;
+    margin:4px 0 6px;
     color:var(--brand);
     word-break:break-word;
   }
   .tile-count{
     font-family:var(--font-num);
-    font-size:54px;
+    font-size:26px;              /* 全体の残り時間(board-hero)より小さく、脇役に */
     font-weight:700;
     color:var(--accent);
     line-height:1;
   }
   .tile-count.behind{ color:var(--danger); }
-  .tile-next{ font-size:12px; color:var(--muted); margin-top:10px; }
+  .tile-next{ font-size:11px; color:var(--muted); margin-top:6px; }
 
   .tile-actions{
     display:flex;
@@ -265,7 +269,7 @@
     border-radius:12px;
     padding:10px 12px;
     font-size:12px;
-    margin-bottom:14px;
+    margin-bottom:10px;
     color:var(--text);
   }
   .suggest b{ color:var(--danger); }
@@ -419,8 +423,12 @@ let state = {
   // --- 実行中のみ使う値 ---
   currentIndex: 0,
   remainingSeconds: 0,
+  taskDeadline: null,      // 現在タスクが「0:00になる瞬間」の絶対時刻(Date)。
+                            // スリープ復帰後もここから正しく再計算するために使う。
   startedAt: null,        // 開始した瞬間のDate
   plannedStops: [],        // タイムテーブル表示用(開始時に計算した予定時刻)
+  announced10: false,      // 出発まで10分の音声案内を出したか
+  announced5: false,       // 出発まで5分の音声案内を出したか
 };
 
 let tickTimer = null; // setInterval のID
@@ -575,22 +583,23 @@ function drawPipFrame(){
   // 背景(House Green)
   ctx.fillStyle = "#1E3932";
   ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  // タスク名(上段)
-  ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.font = "600 15px sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(task ? task.name : "完了", canvas.width/2, 34);
 
-  // 残り時間(大きい数字・中段。順調ならGold、遅れならRed) ← ここが一番見たい情報
+  // 出発までの残り時間(一番見たい情報 → 一番大きく)
   ctx.fillStyle = behind ? "#ff9a8f" : "#cba258";
-  ctx.font = "700 56px Georgia, serif";
-  ctx.fillText(fmtCountdown(state.remainingSeconds), canvas.width/2, 105);
+  ctx.font = "700 52px Georgia, serif";
+  ctx.fillText((behind?"-":"")+fmtHM(Math.abs(budget.buffer)), canvas.width/2, 78);
+  ctx.fillStyle = "rgba(255,255,255,.6)";
+  ctx.font = "500 12px sans-serif";
+  ctx.fillText(behind ? "遅刻しそうです" : "出発まで", canvas.width/2, 96);
 
-  // 出発までのバッファ(下段・小さめ)
-  ctx.fillStyle = behind ? "#ff9a8f" : "#d4e9e2";
-  ctx.font = "500 14px sans-serif";
-  ctx.fillText((behind?"遅れ ":"余裕 ") + fmtHM(Math.abs(budget.buffer)), canvas.width/2, 150);
+  // 現在のタスク名と作業時間(脇役・小さく)
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  ctx.font = "600 15px sans-serif";
+  ctx.fillText(task ? task.name : "完了", canvas.width/2, 130);
+  ctx.fillStyle = "rgba(255,255,255,.6)";
+  ctx.font = "500 16px monospace";
+  ctx.fillText(fmtCountdown(state.remainingSeconds), canvas.width/2, 152);
 }
 
 // ボタンのクリックから「間に何のawaitも挟まず」直接呼ぶのがポイント(iOS Safari対策)。
@@ -641,6 +650,8 @@ function startRoutine(){
   state.tasks = state.tasks.map(t=>({...t, done:false, skipped:false}));
   state.currentIndex = firstUnfinishedIndex(0);
   state.startedAt = new Date();
+  state.announced10 = false;
+  state.announced5 = false;
 
   // タイムテーブル用に「予定時刻」を最初に一度だけ計算しておく
   let cursor = new Date(state.startedAt);
@@ -651,25 +662,53 @@ function startRoutine(){
   });
 
   if(state.currentIndex < state.tasks.length){
-    state.remainingSeconds = state.tasks[state.currentIndex].seconds;
-    speak(`${state.tasks[state.currentIndex].name}の時間です`);
+    const task = state.tasks[state.currentIndex];
+    // "残り秒数"ではなく「いつ0:00になるか」という絶対時刻で管理する。
+    // こうすることで、スリープなどでtickが飛んでも次にrecompute()した瞬間に
+    // 正しい残り時間へ復帰できる(単純に毎秒1引くだけだと、寝てる間の分がズレて消えてしまう)。
+    state.taskDeadline = new Date(Date.now() + task.seconds*1000);
+    state.remainingSeconds = task.seconds;
+    speak(`${task.name}の時間です`);
   }
   state.screen = "running";
   clearInterval(tickTimer);
-  tickTimer = setInterval(tick, 1000);
+  tickTimer = setInterval(recompute, 1000);
   render();
   setupPipStream(); // 映像ストリームをここで先に用意しておく(PinPタップ時に間を空けないため)
 }
 
-function tick(){
+// ==========================================================
+// 実際の時刻をもとに「今どうなっているべきか」を再計算する。
+// 1秒ごとのtickだけでなく、スリープ復帰時(visibilitychange)にも呼ぶことで、
+// 「スリープしてる間に進んでるのか分からない」問題に対応する。
+// ==========================================================
+function recompute(){
   if(state.screen !== "running") return;
-  state.remainingSeconds -= 1;
+  const now = new Date();
+  state.remainingSeconds = Math.round((state.taskDeadline - now)/1000);
+
   if(state.remainingSeconds <= 0){
-    completeTask(true); // true = 時間切れによる自動完了
-    return; // completeTask内でrenderする
+    completeTask(true); // 時間切れ→自動で次のタスクへ(ここでrender済み)
+    return;
   }
+  checkVoiceThresholds();
   render();
-  drawPipFrame(); // 小窓が開いていれば、その中身もここで更新する
+  drawPipFrame();
+}
+// 過去のコードとの互換用(setIntervalの呼び先名を変更したための別名)
+function tick(){ recompute(); }
+
+// 出発までの残り時間が10分・5分を切ったタイミングで一度だけ声で知らせる
+function checkVoiceThresholds(){
+  const budget = computeBudget();
+  if(budget.buffer > 0 && budget.buffer <= 600 && !state.announced10){
+    state.announced10 = true;
+    speak("出発まで残り10分です");
+  }
+  if(budget.buffer > 0 && budget.buffer <= 300 && !state.announced5){
+    state.announced5 = true;
+    speak("出発まで残り5分です");
+  }
 }
 
 function completeTask(auto){
@@ -691,15 +730,18 @@ function advance(){
     finishRoutine();
     return;
   }
-  state.remainingSeconds = state.tasks[next].seconds;
+  const task = state.tasks[next];
+  state.taskDeadline = new Date(Date.now() + task.seconds*1000);
+  state.remainingSeconds = task.seconds;
   render();
   drawPipFrame();
-  speak(`${state.tasks[next].name}の時間です`);
+  speak(`${task.name}の時間です`);
   // 画面が切り替わったタイルにフェード演出を付ける
   const tile = document.querySelector(".tile");
   if(tile){ tile.classList.add("flip"); setTimeout(()=>tile.classList.remove("flip"),320); }
 }
 function extendCurrent(sec){
+  state.taskDeadline = new Date(state.taskDeadline.getTime() + sec*1000);
   state.remainingSeconds += sec;
   render();
 }
@@ -715,7 +757,8 @@ function stopAndReset(){
   render();
 }
 
-// 「予定終了時刻に対して間に合うか」を計算
+// 「予定終了時刻に対して間に合うか」を計算(常にDate.now()基準なので、
+// tickが多少飛んでもここを呼び直せば必ず正しい値になる)
 function computeBudget(){
   const now = new Date();
   const leave = timeStrToDate(state.leaveTime);
@@ -834,26 +877,10 @@ function renderRunning(){
   return `
     ${renderHeader('running')}
     <div class="board">
-      <div class="board-row">
-        <div>
-          <div class="board-label">出発予定</div>
-          <div class="board-value">${state.leaveTime}</div>
-        </div>
-        <div style="text-align:right">
-          <div class="board-label">${behind?'このままだと遅刻します':'順調です'}</div>
-          <div class="board-value ${behind?'warn':'ok'}">${behind?'-':''}${fmtHM(Math.abs(budget.buffer))}</div>
-        </div>
-      </div>
-      <div class="board-sub">現在時刻 ${fmtClock(new Date())}</div>
+      <div class="board-label">${behind ? 'このままだと遅刻します' : '出発まで残り'}</div>
+      <div class="board-hero ${behind?'warn':''}">${behind?'-':''}${fmtHM(Math.abs(budget.buffer))}</div>
+      <div class="board-sub">出発予定 ${state.leaveTime}　・　現在 ${fmtClock(new Date())}</div>
     </div>
-
-    ${behind && lowPriorityCandidates.length ? `
-    <div class="suggest">
-      <b>遅れています。</b>スキップ可のタスクを飛ばして巻き返せます:
-      <div class="chips">
-        ${lowPriorityCandidates.map(t=>`<span class="chip" data-act="quickskip" data-i="${t.i}">${escapeHtml(t.name)} を飛ばす</span>`).join("")}
-      </div>
-    </div>` : ""}
 
     <div class="tile">
       <div class="tile-eyebrow">TASK ${state.currentIndex+1} / ${state.tasks.length}</div>
@@ -866,6 +893,14 @@ function renderRunning(){
         <button class="btn warn" data-act="skip">スキップ</button>
       </div>
     </div>
+
+    ${behind && lowPriorityCandidates.length ? `
+    <div class="suggest">
+      <b>遅れています。</b>スキップ可のタスクを飛ばして巻き返せます:
+      <div class="chips">
+        ${lowPriorityCandidates.map(t=>`<span class="chip" data-act="quickskip" data-i="${t.i}">${escapeHtml(t.name)} を飛ばす</span>`).join("")}
+      </div>
+    </div>` : ""}
 
     <div class="progress-wrap">
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
@@ -988,6 +1023,13 @@ function bindEvents(){
     document.querySelector('[data-act="backToSetup"]').addEventListener("click", stopAndReset);
   }
 }
+
+// スリープ復帰・タブ復帰した瞬間に、実際の時刻をもとに即座に状態を再計算する。
+// これが無いと「スリープ中は画面が固まったまま」になり、再開時に古い表示のまま
+// 気づかず遅刻する、という今回の問題が起きる。
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState === "visible") recompute();
+});
 
 // ---- 起動 ----
 loadConfig();
