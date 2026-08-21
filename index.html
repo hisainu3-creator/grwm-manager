@@ -233,34 +233,67 @@
   }
   .progress-text{ font-size:11px; color:var(--muted); margin-top:6px; text-align:right; }
 
-  /* ---------- タイムテーブル(横スクロール) ---------- */
-  .timetable{
-    display:flex;
-    gap:8px;
-    overflow-x:auto;
-    padding-bottom:6px;
-    margin-bottom:24px;
+  /* ---------- 時間+現在のタスクを画面上部に固定 ---------- */
+  .sticky-top{
+    position:sticky;
+    top:0;
+    background:var(--bg);
+    padding-top:4px;
+    margin:0 -16px 10px;
+    padding-left:16px;
+    padding-right:16px;
+    padding-bottom:4px;
+    z-index:40;
   }
-  .timetable::-webkit-scrollbar{ height:4px; }
-  .timetable::-webkit-scrollbar-thumb{ background:var(--line); border-radius:4px; }
-  .stop{
+
+  /* ---------- タイムライン(縦スクロール・アイコン付き) ---------- */
+  .timeline{
+    display:flex;
+    flex-direction:column;
+    margin-bottom:20px;
+  }
+  .timeline-row{
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    position:relative;
+    padding-bottom:20px;
+  }
+  .timeline-row:last-child{ padding-bottom:0; }
+  .timeline-row::before{
+    /* 各アイコンをつなぐ縦線(参考画像のタイムライン風)。
+       見えにくいという指摘があったため、線をやや太く・濃くしてある。
+       完了したタスクの区間はGreen Accentで塗って進捗が一目で分かるようにした。 */
+    content:"";
+    position:absolute;
+    left:17px;
+    top:36px;
+    bottom:-2px;
+    width:3px;
+    background:rgba(0,0,0,.18);
+  }
+  .timeline-row.done::before{ background:var(--accent); }
+  .timeline-row:last-child::before{ display:none; }
+  .timeline-icon{
     flex:0 0 auto;
-    min-width:86px;
+    width:36px; height:36px;
+    border-radius:50%;
     background:var(--panel);
     border:1px solid var(--line);
-    border-radius:12px;
-    padding:8px 10px;
-    text-align:center;
-    box-shadow:0 0 0.5px rgba(0,0,0,.10);
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px;
+    z-index:1;
   }
-  .stop.current{ border-color:var(--accent); background:var(--accent-light); }
-  .stop.done{ opacity:.5; }
-  .stop.skipped{ opacity:.4; text-decoration:line-through; }
-  .stop-time{ font-family:var(--font-num); font-size:11px; color:var(--muted); }
-  .stop-name{ font-size:11px; margin-top:2px; color:var(--text); }
-  .stop-mark{ font-size:10px; margin-top:4px; color:var(--muted); }
-  .stop.current .stop-mark{ color:var(--accent); font-weight:700; }
-  .stop.done .stop-mark{ color:var(--brand); }
+  .timeline-row.current .timeline-icon{ background:var(--accent-light); border-color:var(--accent); }
+  .timeline-row.done .timeline-icon{ opacity:.45; }
+  .timeline-row.skipped .timeline-icon{ opacity:.3; }
+  .timeline-body{ flex:1; padding-top:6px; min-width:0; }
+  .timeline-name{ font-size:14px; font-weight:700; color:var(--text); }
+  .timeline-row.done .timeline-name, .timeline-row.skipped .timeline-name{
+    color:var(--muted); text-decoration:line-through; font-weight:500;
+  }
+  .timeline-time{ font-family:var(--font-num); font-size:11px; color:var(--muted); margin-top:2px; }
+  .timeline-status{ font-size:11px; color:var(--accent); margin-top:2px; font-weight:700; }
 
   /* ---------- 遅延時のスキップ提案 ---------- */
   .suggest{
@@ -552,6 +585,30 @@ function toggleVoice(){
 }
 
 // ==========================================================
+// 画面スリープ防止(Screen Wake Lock API)
+// ------------------------------------------------------------
+// 「スマホを触らないとすぐ画面が暗くなる」問題への対策。
+// 実行中はこれをリクエストし、画面が自動で暗くならないようにする。
+// 対応: iOS Safari 16.4以降、Android Chromeなど。非対応環境では何もしない。
+// 注意: これはあくまで「自動スリープを防ぐ」機能で、
+//   自分でロックボタンを押したり他アプリに切り替えた場合は防げない。
+// ==========================================================
+let wakeLock = null;
+async function requestWakeLock(){
+  try{
+    if("wakeLock" in navigator){
+      wakeLock = await navigator.wakeLock.request("screen");
+    }
+  }catch(e){ /* 非対応・許可されない環境は無視して通常動作にフォールバック */ }
+}
+function releaseWakeLock(){
+  if(wakeLock){
+    wakeLock.release().catch(()=>{});
+    wakeLock = null;
+  }
+}
+
+// ==========================================================
 // 「ながら準備(PinP)」機能
 // ------------------------------------------------------------
 // 仕組み:
@@ -598,7 +655,7 @@ function drawPipFrame(){
   // 出発までの残り時間(一番見たい情報 → 一番大きく)
   ctx.fillStyle = behind ? "#ff9a8f" : "#cba258";
   ctx.font = "700 46px Georgia, serif";
-  ctx.fillText((behind?"-":"")+fmtCountdownLong(Math.abs(budget.buffer)), canvas.width/2, 78);
+  ctx.fillText((budget.secondsUntilLeave<0?"-":"")+fmtCountdownLong(Math.abs(budget.secondsUntilLeave)), canvas.width/2, 78);
   ctx.fillStyle = "rgba(255,255,255,.6)";
   ctx.font = "500 12px sans-serif";
   ctx.fillText(behind ? "遅刻しそうです" : "出発まで", canvas.width/2, 96);
@@ -662,6 +719,7 @@ function startRoutine(){
   state.startedAt = new Date();
   state.announced10 = false;
   state.announced5 = false;
+  state.announced20 = false;
 
   // タイムテーブル用に「予定時刻」を最初に一度だけ計算しておく
   let cursor = new Date(state.startedAt);
@@ -685,6 +743,7 @@ function startRoutine(){
   tickTimer = setInterval(recompute, 1000);
   render();
   setupPipStream(); // 映像ストリームをここで先に用意しておく(PinPタップ時に間を空けないため)
+  requestWakeLock(); // 画面がすぐスリープしないようにする(対応環境のみ)
 }
 
 // ==========================================================
@@ -708,14 +767,20 @@ function recompute(){
 // 過去のコードとの互換用(setIntervalの呼び先名を変更したための別名)
 function tick(){ recompute(); }
 
-// 出発までの残り時間が10分・5分を切ったタイミングで一度だけ声で知らせる
+// 出発までの残り時間が20分・10分・5分を切ったタイミングで一度だけ声で知らせる。
+// 「作業が遅れている分」ではなく、単純な「出発時刻までの実時間」を基準にする。
 function checkVoiceThresholds(){
   const budget = computeBudget();
-  if(budget.buffer > 0 && budget.buffer <= 600 && !state.announced10){
+  const t = budget.secondsUntilLeave;
+  if(t > 0 && t <= 1200 && !state.announced20){
+    state.announced20 = true;
+    speak("出発まで残り20分です");
+  }
+  if(t > 0 && t <= 600 && !state.announced10){
     state.announced10 = true;
     speak("出発まで残り10分です");
   }
-  if(budget.buffer > 0 && budget.buffer <= 300 && !state.announced5){
+  if(t > 0 && t <= 300 && !state.announced5){
     state.announced5 = true;
     speak("出発まで残り5分です");
   }
@@ -757,11 +822,13 @@ function extendCurrent(sec){
 }
 function finishRoutine(){
   clearInterval(tickTimer);
+  releaseWakeLock();
   state.screen = "finished";
   render();
 }
 function stopAndReset(){
   clearInterval(tickTimer);
+  releaseWakeLock();
   state.tasks = state.tasks.map(t=>({...t, done:false, skipped:false}));
   state.screen = "setup";
   render();
@@ -868,15 +935,18 @@ function renderRunning(){
 
   const stops = state.tasks.map((t,i)=>{
     const planned = state.plannedStops.find(p=>p.id===t.id);
-    let cls = "stop";
-    let mark = "";
-    if(t.done){ cls+=" done"; mark="✓"; }
-    else if(t.skipped){ cls+=" skipped"; mark="skip"; }
-    else if(i===state.currentIndex){ cls+=" current"; mark="▶ 実行中"; }
+    let cls = "timeline-row";
+    let status = "";
+    if(t.done){ cls+=" done"; status="✓ 完了"; }
+    else if(t.skipped){ cls+=" skipped"; status="スキップ"; }
+    else if(i===state.currentIndex){ cls+=" current"; status="▶ 実行中"; }
     return `<div class="${cls}">
-      <div class="stop-time">${planned?fmtClock(planned.at):""}</div>
-      <div class="stop-name">${escapeHtml(t.name)}</div>
-      <div class="stop-mark">${mark}</div>
+      <div class="timeline-icon">${pickIcon(t.name)}</div>
+      <div class="timeline-body">
+        <div class="timeline-name">${escapeHtml(t.name)}</div>
+        <div class="timeline-time">${planned?fmtClock(planned.at):""}</div>
+        ${status?`<div class="timeline-status">${status}</div>`:""}
+      </div>
     </div>`;
   }).join("");
 
@@ -886,21 +956,25 @@ function renderRunning(){
 
   return `
     ${renderHeader('running')}
-    <div class="board">
-      <div class="board-label">${behind ? 'このままだと遅刻します' : '出発まで残り'}</div>
-      <div class="board-hero ${behind?'warn':''}">${behind?'-':''}${fmtCountdownLong(Math.abs(budget.buffer))}</div>
-      <div class="board-sub">出発予定 ${state.leaveTime}　・　現在 ${fmtClock(new Date())}</div>
-    </div>
 
-    <div class="tile">
-      <div class="tile-eyebrow">TASK ${state.currentIndex+1} / ${state.tasks.length}</div>
-      <div class="tile-task">${escapeHtml(task.name)}</div>
-      <div class="tile-count ${behind?'behind':''}">${fmtCountdown(state.remainingSeconds)}</div>
-      <div class="tile-next">${nextTask ? "次: "+escapeHtml(nextTask.name) : "これが最後のタスクです"}</div>
-      <div class="tile-actions">
-        <button class="btn" data-act="extend">+30秒</button>
-        <button class="btn primary" data-act="complete">完了 ✓</button>
-        <button class="btn warn" data-act="skip">スキップ</button>
+    <!-- 出発までの残り時間と現在のタスクは画面上部に固定表示 -->
+    <div class="sticky-top">
+      <div class="board">
+        <div class="board-label">${behind ? 'このままだと遅刻します' : '出発まで残り'}</div>
+        <div class="board-hero ${behind?'warn':''}">${budget.secondsUntilLeave<0?'-':''}${fmtCountdownLong(Math.abs(budget.secondsUntilLeave))}</div>
+        <div class="board-sub">出発予定 ${state.leaveTime}　・　現在 ${fmtClock(new Date())}</div>
+      </div>
+
+      <div class="tile">
+        <div class="tile-eyebrow">TASK ${state.currentIndex+1} / ${state.tasks.length}</div>
+        <div class="tile-task">${escapeHtml(task.name)}</div>
+        <div class="tile-count ${behind?'behind':''}">${fmtCountdown(state.remainingSeconds)}</div>
+        <div class="tile-next">${nextTask ? "次: "+escapeHtml(nextTask.name) : "これが最後のタスクです"}</div>
+        <div class="tile-actions">
+          <button class="btn" data-act="extend">+30秒</button>
+          <button class="btn primary" data-act="complete">完了 ✓</button>
+          <button class="btn warn" data-act="skip">スキップ</button>
+        </div>
       </div>
     </div>
 
@@ -909,7 +983,8 @@ function renderRunning(){
       <div class="progress-text">${doneCount} / ${state.tasks.length} 完了</div>
     </div>
 
-    <div class="timetable">${stops}</div>
+    <!-- スケジュール全体は縦スクロールのタイムラインで表示 -->
+    <div class="timeline">${stops}</div>
 
     <button class="btn ghost" style="width:100%" data-act="stop">中断して設定に戻る</button>
 
@@ -936,6 +1011,28 @@ function renderFinished(){
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// タスク名から人物向けの汎用アイコン(絵文字)を推測する。
+// 猫アプリのような専用イラストではなく、誰でも意味が分かる一般的な絵文字を使用。
+// 該当が無ければ「・」を表示。
+function pickIcon(name){
+  const table = [
+    [/起きる|起床/, "⏰"],
+    [/トイレ/, "🚻"],
+    [/顔.*洗|洗顔/, "🧼"],
+    [/化粧水|美容液|乳液|クリーム|スキンケア/, "🧴"],
+    [/着替え/, "👕"],
+    [/ヘアオイル|ドライヤー|コテ|アイロン|ワックス|ヘア/, "💇"],
+    [/日焼け止め|ファンデ|パウダー|ビューラー|アイ|マスカラ|リップ|チーク|シェーディング|ハイライト|メイク|スプレー/, "💄"],
+    [/お湯|沸かす/, "☕"],
+    [/ごはん|朝食|食べ/, "🍚"],
+    [/皿.*洗/, "🍽️"],
+    [/お弁当|水筒|バッグ/, "🎒"],
+    [/家を出る|出発/, "🚪"],
+  ];
+  for(const [re,icon] of table){ if(re.test(name)) return icon; }
+  return "・";
 }
 
 // ==========================================================
@@ -1030,7 +1127,10 @@ function bindEvents(){
 // これが無いと「スリープ中は画面が固まったまま」になり、再開時に古い表示のまま
 // 気づかず遅刻する、という今回の問題が起きる。
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState === "visible") recompute();
+  if(document.visibilityState === "visible"){
+    recompute();
+    if(state.screen === "running") requestWakeLock(); // バックグラウンドで解除されるため再取得
+  }
 });
 
 // ---- 起動 ----
