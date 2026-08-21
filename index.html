@@ -490,6 +490,16 @@ function fmtHM(totalSeconds){
   if(h>0) return h+"時間"+m+"分";
   return m+"分";
 }
+// 出発までの残り時間をタスクの秒数カウントと同じ「MM:SS」形式で表示するための関数。
+// 60分を超える場合だけ H:MM:SS にする(通常の朝の準備時間なら基本 MM:SS で収まる)。
+function fmtCountdownLong(totalSeconds){
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s/3600);
+  const m = Math.floor((s%3600)/60);
+  const ss = s%60;
+  if(h>0) return h+":"+m.toString().padStart(2,"0")+":"+ss.toString().padStart(2,"0");
+  return m.toString().padStart(2,"0")+":"+ss.toString().padStart(2,"0");
+}
 // "09:00" のような文字列 → 今日のその時刻のDateオブジェクトに変換
 function timeStrToDate(str){
   const [h,m] = str.split(":").map(Number);
@@ -587,8 +597,8 @@ function drawPipFrame(){
 
   // 出発までの残り時間(一番見たい情報 → 一番大きく)
   ctx.fillStyle = behind ? "#ff9a8f" : "#cba258";
-  ctx.font = "700 52px Georgia, serif";
-  ctx.fillText((behind?"-":"")+fmtHM(Math.abs(budget.buffer)), canvas.width/2, 78);
+  ctx.font = "700 46px Georgia, serif";
+  ctx.fillText((behind?"-":"")+fmtCountdownLong(Math.abs(budget.buffer)), canvas.width/2, 78);
   ctx.fillStyle = "rgba(255,255,255,.6)";
   ctx.font = "500 12px sans-serif";
   ctx.fillText(behind ? "遅刻しそうです" : "出発まで", canvas.width/2, 96);
@@ -878,7 +888,7 @@ function renderRunning(){
     ${renderHeader('running')}
     <div class="board">
       <div class="board-label">${behind ? 'このままだと遅刻します' : '出発まで残り'}</div>
-      <div class="board-hero ${behind?'warn':''}">${behind?'-':''}${fmtHM(Math.abs(budget.buffer))}</div>
+      <div class="board-hero ${behind?'warn':''}">${behind?'-':''}${fmtCountdownLong(Math.abs(budget.buffer))}</div>
       <div class="board-sub">出発予定 ${state.leaveTime}　・　現在 ${fmtClock(new Date())}</div>
     </div>
 
@@ -893,14 +903,6 @@ function renderRunning(){
         <button class="btn warn" data-act="skip">スキップ</button>
       </div>
     </div>
-
-    ${behind && lowPriorityCandidates.length ? `
-    <div class="suggest">
-      <b>遅れています。</b>スキップ可のタスクを飛ばして巻き返せます:
-      <div class="chips">
-        ${lowPriorityCandidates.map(t=>`<span class="chip" data-act="quickskip" data-i="${t.i}">${escapeHtml(t.name)} を飛ばす</span>`).join("")}
-      </div>
-    </div>` : ""}
 
     <div class="progress-wrap">
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
